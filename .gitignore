@@ -1,0 +1,8 @@
+final_models/best_model.pt
+final_models/mlp_model.pt
+final_models/sgd_model.pkl
+final_models/vectorizer1.pkl
+final_models/vectorizer2.pkl
+final_models/label_encoder.pkl
+*.pt
+*.pkl
