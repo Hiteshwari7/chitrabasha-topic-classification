@@ -15,11 +15,20 @@ The dataset contains 10 million rows in a compressed Parquet format (4GB). Loadi
 - Truncating text to 500 characters to reduce memory footprint while retaining most topical signal
 
 ### Tokenization / Feature Engineering
-We used sklearn's `HashingVectorizer` with the following design decisions:
-- **Hashing trick:** avoids building a vocabulary matrix in RAM, fixed memory footprint regardless of data size
-- **n_features = 2^16 (65536):** balances expressiveness and memory
-- **ngram_range = (1,2):** captures both single words and two-word phrases
-- **norm = l2:** ensures consistent feature scaling
+Two approaches were used across experiments:
+- **HashingVectorizer:** avoids building vocabulary matrix in RAM, fixed memory footprint, used in Experiments 1-3
+- **TF-IDF (word + character ngrams):** captures subword morphology, crucial for multilingual content, used in Experiment 4
+
+### Multilingual Analysis
+A significant finding during EDA: **40.76% of the dataset contains non-ASCII (Hindi/multilingual) content.** This varies heavily by class:
+- Most multilingual: travel_and_tourism (95.6%), literature (64.8%), food_and_dining (58.3%)
+- Least multilingual: home_and_hobbies (9.8%), adult_content (10.2%), transportation (15.0%)
+
+See `experiments/multilingual_analysis.png` for full distribution.
+
+Key insight: multilingual content alone does not hurt performance — travel_and_tourism is 95.6% multilingual yet achieves F1: 0.99. The combination of multilingual content AND low sample size hurts performance (fashion_and_beauty: 57.8% multilingual + 1,446 samples = F1: 0.71).
+
+Character-level ngrams in Experiment 4 explicitly address multilingual content by capturing subword morphology across scripts.
 
 ---
 
@@ -28,11 +37,11 @@ We used sklearn's `HashingVectorizer` with the following design decisions:
 ### Dataset Analysis
 - 10 million rows, 24 topic classes
 - Highly imbalanced: education_and_jobs (430K) vs games (7.6K) in 2.5M sample
-- Multilingual content observed (Hindi text present)
+- 40.76% multilingual content (Hindi dominant)
 - No null values
 
 ### Experiment 1: SGD Classifier + HashingVectorizer (Baseline)
-**Motivation:** Establish a fast CPU baseline using classical ML. SGDClassifier with modified_huber loss is known to work well for text classification and trains in seconds even on large datasets.
+**Motivation:** Establish a fast CPU baseline using classical ML. SGDClassifier with modified_huber loss is known to work well for text classification and trains in seconds.
 
 **Setup:**
 - HashingVectorizer: unigrams, 2^16 features
@@ -41,157 +50,173 @@ We used sklearn's `HashingVectorizer` with the following design decisions:
 - Hardware: CPU
 
 **Results:**
-- Accuracy: 88.70%
-- Macro F1: 0.79
-- Training time: 22.1 seconds
+- Accuracy: 88.70% | Macro F1: 0.79 | Training time: 22.1s
 
 **Observations:**
-- Surprisingly strong baseline for a purely classical approach
+- Surprisingly strong baseline for classical approach
 - Poor recall on minority classes (art_and_design: 0.27, fashion_and_beauty: 0.37)
-- travel_and_tourism and adult_content near perfect (distinctive vocabulary)
+- travel_and_tourism and adult_content near perfect
 
-**What didn't work:** TF-IDF with 100K features caused RAM crashes on Colab due to dense matrix construction. Switched to HashingVectorizer which uses fixed memory.
+**What didn't work:** TF-IDF with 100K features caused RAM crashes. Switched to HashingVectorizer.
 
 ---
 
 ### Experiment 2: Custom MLP (GPU)
-**Motivation:** Leverage the T4 GPU for a neural approach. A simple MLP over bag-of-words features has been shown to be surprisingly competitive for topic classification. Built entirely from scratch with no pretrained weights.
+**Motivation:** Leverage T4 GPU with neural approach. MLP over bag-of-words features built entirely from scratch.
 
 **Setup:**
 - HashingVectorizer: bigrams, 2^16 features
 - 3-layer MLP: Linear(65536→512)→BN→ReLU→Dropout(0.3)→Linear(512→256)→BN→ReLU→Dropout(0.3)→Linear(256→24)
-- Optimizer: Adam, lr=1e-3
-- Batch size: 512, Epochs: 5
-- Parameters: 33,693,976
+- Optimizer: Adam lr=1e-3 | Epochs: 5 | Parameters: 33,693,976
 
 **Results:**
-- Accuracy: 90.78%
-- Macro F1: 0.85
-- Training time: ~199s per epoch
+- Accuracy: 90.78% | Macro F1: 0.85 | Training time: ~199s/epoch
 
 **Observations:**
-- Significant improvement over baseline (+2.08%)
-- Validation accuracy plateaued after epoch 1 (0.9068 → 0.9078) while training accuracy kept rising — classic overfitting
-- Key insight: model capacity is sufficient but regularization needs tuning
-
-**What didn't work:** Converting full sparse matrix to dense array caused RAM crash. Fixed by implementing a SparseDataset that converts one row at a time to dense on-the-fly during batching.
+- +2.08% over baseline
+- Val accuracy plateaued after epoch 1 — overfitting observed
+- Converting sparse matrix to dense caused RAM crash — fixed with SparseDataset
 
 ---
 
-### Experiment 3: Improved MLP (Final Model)
-**Motivation:** Address overfitting observed in Experiment 2 by increasing model capacity, adding stronger regularization, and using a better optimizer and scheduler.
-
-**Changes from Experiment 2:**
-- Deeper architecture: 4 layers (added 1024-dim layer)
-- Dropout increased: 0.3 → 0.4
-- Optimizer: Adam → AdamW (weight decay = 1e-4)
-- Scheduler: CosineAnnealingLR (smoother lr decay)
-- Epochs: 5 → 8
+### Experiment 3: Improved MLP (GPU)
+**Motivation:** Address overfitting from Experiment 2 with deeper architecture and better regularization.
 
 **Setup:**
-- Architecture: Linear(65536→1024)→BN→ReLU→Dropout(0.4)→Linear(1024→512)→BN→ReLU→Dropout(0.4)→Linear(512→256)→BN→ReLU→Dropout(0.4)→Linear(256→24)
+- HashingVectorizer: bigrams, 2^16 features
+- 4-layer MLP: Linear(65536→1024)→BN→ReLU→Dropout(0.4)→Linear(1024→512)→BN→ReLU→Dropout(0.4)→Linear(512→256)→BN→ReLU→Dropout(0.4)→Linear(256→24)
+- Optimizer: AdamW lr=2e-3, weight_decay=1e-4 | Scheduler: CosineAnnealingLR | Epochs: 8
 - Parameters: 67,775,768
 
 **Results:**
-- Accuracy: 91.02%
-- Macro F1: 0.85
-- Training time: ~227s per epoch
-- Best model saved at epoch 8 (still improving — more epochs would help)
+- Accuracy: 91.02% | Macro F1: 0.85 | Training time: ~227s/epoch
 
 **Observations:**
-- Consistent improvement across all 8 epochs — model did not overfit as quickly
-- CosineAnnealingLR helped maintain stable training
-- Still struggling with minority classes
+- Consistent improvement across all 8 epochs
+- Still improving at epoch 8 — more epochs would help
+- See `experiments/training_curves_exp3.png`
 
 ---
 
-## 3. Architecture Details (Final Model)
+### Experiment 4: FastText-style (Word + Character NGrams + Logistic Regression)
+**Motivation:** Task explicitly encourages FastText. FastText's key innovation is subword (character ngram) features which should help with multilingual content.
 
-| Layer | Input Dim | Output Dim | Parameters |
-|---|---|---|---|
-| Linear 1 | 65536 | 1024 | 67,108,864 |
-| BatchNorm 1 | 1024 | 1024 | 2,048 |
-| Linear 2 | 1024 | 512 | 524,288 |
-| BatchNorm 2 | 512 | 512 | 1,024 |
-| Linear 3 | 512 | 256 | 131,072 |
-| BatchNorm 3 | 256 | 256 | 512 |
-| Linear 4 | 256 | 24 | 6,144 |
-| **Total** | | | **67,773,952** |
+**Setup:**
+- Word TF-IDF: bigrams, 50,000 features
+- Character TF-IDF: 3-5 grams, 50,000 features
+- Combined: 100,000 features
+- Logistic Regression: saga solver, C=5.0, max_iter=500
+- Training time: 1649.7s (~27.5 mins)
 
-**Parameter count: 67,775,768 — well within the 5B limit.**
+**Results:**
+- Accuracy: 92.05% | Macro F1: 0.86 | Training time: 1649.7s
+
+**Observations:**
+- BEST performing model overall — classical ML beat deep learning!
+- Character ngrams explicitly capture Hindi subword morphology
+- travel_and_tourism F1: 0.99 — character ngrams helped multilingual classes
+- art_and_design still weakest (F1: 0.64) — low sample size persists
+- Key insight: for multilingual text, character-level features are very powerful
+
+---
+
+## 3. Architecture Details (Final Model - Experiment 4)
+
+**FastText-style Feature Extraction:**
+
+| Component | Type | Features |
+|---|---|---|
+| Word TF-IDF | Unigrams + Bigrams | 50,000 |
+| Char TF-IDF | 3-5 character ngrams | 50,000 |
+| Combined | Concatenated sparse matrix | 100,000 |
+
+**Classifier:** Logistic Regression (saga solver)
+- C = 5.0 (regularization)
+- max_iter = 500
+- No pretrained weights — trained entirely from scratch
+
+**Parameter count:** Logistic Regression has 100,000 × 24 = 2,400,024 parameters — well within 5B limit.
 
 **Design decisions:**
-- MLP over sparse BoW features: simple, interpretable, GPU-efficient
-- BatchNorm before activation: stabilizes training, reduces internal covariate shift
-- Dropout(0.4): prevents overfitting on imbalanced classes
-- No pretrained embeddings: built entirely from scratch as required
+- Character ngrams handle multilingual (Hindi) content natively
+- Word ngrams capture semantic meaning
+- Logistic Regression: simple, interpretable, no risk of overfitting like neural nets
 
 ---
 
 ## 4. Training Strategy
 
-- **Train/Val Split:** 80/20 stratified split (seed=42)
-- **Batch size:** 512
-- **Epochs:** 8
-- **Optimizer:** AdamW (lr=2e-3, weight_decay=1e-4)
-- **Scheduler:** CosineAnnealingLR (T_max=8)
-- **Hardware:** Google Colab Tesla T4 GPU
-- **Training time:** ~227s per epoch (~30 mins total)
+- **Train/Val Split:** 80/20 stratified (seed=42)
+- **Hardware:** Google Colab Tesla T4 GPU (neural experiments), CPU (classical)
 - **Random seeds:** Fixed at 42 for numpy, torch, sklearn
+
+| Experiment | Optimizer | Epochs | Time |
+|---|---|---|---|
+| 1 - SGD | SGD | 50 iter | 22s |
+| 2 - MLP | Adam lr=1e-3 | 5 | ~17 min |
+| 3 - MLP | AdamW lr=2e-3 | 8 | ~30 min |
+| 4 - FastText | saga C=5.0 | 500 iter | ~27 min |
 
 ---
 
 ## 5. Evaluation Metrics
 
-### Final Model (Experiment 3)
+### All Experiments Summary
 
-| Metric | Score |
-|---|---|
-| Accuracy | 91.02% |
-| Macro Precision | 0.88 |
-| Macro Recall | 0.83 |
-| Macro F1 | 0.85 |
-| Weighted F1 | 0.91 |
+| Experiment | Accuracy | Macro P | Macro R | Macro F1 |
+|---|---|---|---|---|
+| 1 - SGD Baseline | 88.70% | - | - | 0.79 |
+| 2 - Custom MLP | 90.78% | 0.88 | 0.82 | 0.85 |
+| 3 - Improved MLP | 91.02% | 0.88 | 0.83 | 0.85 |
+| 4 - FastText LR | **92.05%** | **0.89** | **0.85** | **0.86** |
 
-### Per-class highlights
+See `experiments/accuracy_comparison.png` for visual comparison.
+
+### Final Model Per-class Highlights (Experiment 4)
 
 | Class | Precision | Recall | F1 |
 |---|---|---|---|
-| travel_and_tourism | 0.99 | 0.98 | 0.98 |
-| adult_content | 1.00 | 0.97 | 0.98 |
-| finance_and_business | 0.96 | 0.95 | 0.95 |
-| art_and_design | 0.78 | 0.47 | 0.59 |
-| games | 0.76 | 0.60 | 0.67 |
-| fashion_and_beauty | 0.81 | 0.60 | 0.69 |
+| travel_and_tourism | 0.99 | 0.98 | 0.99 |
+| adult_content | 1.00 | 0.96 | 0.98 |
+| finance_and_business | 0.96 | 0.96 | 0.96 |
+| art_and_design | 0.82 | 0.52 | 0.64 |
+| games | 0.78 | 0.62 | 0.69 |
+| industrial | 0.74 | 0.65 | 0.69 |
+
+See `experiments/per_class_f1.png` and `experiments/confusion_matrix_exp3.png`.
 
 ---
 
 ## 6. Error Analysis
 
 ### Where the model fails
-- **art_and_design (F1: 0.59):** Only 1,697 samples in 500K — severely underrepresented. Model lacks enough examples to learn distinctive patterns.
-- **games (F1: 0.67):** Only 958 samples. Gaming content likely overlaps with software and electronics.
-- **fashion_and_beauty (F1: 0.69):** Overlaps with social_life and entertainment vocabulary.
-- **industrial (F1: 0.68):** Technical vocabulary overlaps with science_math_and_technology.
+- **art_and_design (F1: 0.64):** Only 1,697 samples — severely underrepresented
+- **games (F1: 0.69):** Only 958 samples. Overlaps with software and electronics
+- **fashion_and_beauty (F1: 0.71):** 57.8% multilingual + low samples
+- **industrial (F1: 0.69):** Technical vocabulary overlaps with science_math_and_technology
 
 ### Patterns in misclassification
 - Minority classes consistently misclassified as majority classes
-- Semantically similar topics confused: software vs software_development, science vs education
-- Multilingual content (Hindi) may hurt performance since HashingVectorizer treats all characters equally
+- software vs software_development confusion (semantically similar)
+- science vs education overlap
+- Multilingual content + low sample size = worst performance combination
 
 ### Potential improvements
-1. **Class balancing:** Oversample minority classes or use weighted cross-entropy loss
+1. **Class balancing:** Weighted cross-entropy or oversampling minority classes
 2. **More data:** Use full 10M dataset with chunked training
-3. **Character-level features:** Better handle multilingual content
-4. **Ensemble:** Combine SGD baseline with MLP for better minority class recall
-5. **More epochs:** Experiment 3 was still improving at epoch 8
+3. **Language detection:** Separate pipelines for Hindi vs English
+4. **Ensemble:** Combine FastText-style with MLP for better minority class recall
+5. **More epochs:** Neural models still improving at final epoch
 
 ---
 
 ## 7. Experiment Summary
 
-| Experiment | Model | Accuracy | Macro F1 | Params | Time |
-|---|---|---|---|---|---|
-| 1 | SGD + HashingVectorizer | 88.70% | 0.79 | N/A | 22s |
-| 2 | Custom MLP | 90.78% | 0.85 | 33.7M | ~17min |
-| 3 | Improved MLP (Final) | **91.02%** | **0.85** | **67.8M** | ~30min |
+| Experiment | Model | Accuracy | Macro F1 | Time |
+|---|---|---|---|---|
+| 1 | SGD + HashingVectorizer | 88.70% | 0.79 | 22s |
+| 2 | Custom MLP (33.7M params) | 90.78% | 0.85 | ~17min |
+| 3 | Improved MLP (67.8M params) | 91.02% | 0.85 | ~30min |
+| 4 | FastText-style LR (Final) | **92.05%** | **0.86** | ~27min |
+
+**Final model selected: Experiment 4** — highest accuracy, best macro F1, handles multilingual content explicitly via character ngrams, and is highly interpretable.
