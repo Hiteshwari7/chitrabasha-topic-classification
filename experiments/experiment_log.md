@@ -46,3 +46,18 @@
 | 1 | SGD Baseline | 88.70% | 0.79 | N/A |
 | 2 | Custom MLP | 90.78% | 0.85 | 33.7M |
 | 3 | Improved MLP | 91.02% | 0.85 | 67.8M |
+
+## Multilingual Analysis
+- 40.76% of dataset contains non-ASCII (Hindi/multilingual) content
+- travel_and_tourism: 95.6% multilingual → yet best F1 (0.98) due to large sample size
+- fashion_and_beauty: 57.8% multilingual + low samples → poor F1 (0.69)
+- Key insight: multilingual content + low sample size = poor performance
+- HashingVectorizer handles unicode characters natively which explains
+  why multilingual classes still perform reasonably well
+
+## Multilingual Analysis
+- 40.76% of dataset contains non-ASCII content
+- Most multilingual class: travel_and_tourism (95.6%)
+- Least multilingual class: home_and_hobbies (9.8%)
+- Key insight: multilingual content + low sample size = poor performance
+- HashingVectorizer handles unicode natively which helps multilingual classes
