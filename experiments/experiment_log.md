@@ -1,0 +1,48 @@
+# Experiment Log
+
+## Experiment 1: SGD + HashingVectorizer (Baseline)
+- Date: 21-03-2026
+- Model: SGDClassifier (modified_huber loss)
+- Features: HashingVectorizer unigrams, 2^16 features
+- Train size: 320,000 | Val size: 80,000
+- Training time: 22.1s
+- Val Accuracy: 88.70%
+- Macro F1: 0.79
+- Notes: RAM crashed with TF-IDF 100K features. Switched to HashingVectorizer.
+  Strong baseline. Poor recall on minority classes (art_and_design: 0.27)
+
+## Experiment 2: Custom MLP (GPU)
+- Date: 21-03-2026  
+- Model: 3-layer MLP from scratch
+- Features: HashingVectorizer bigrams, 2^16 features
+- Parameters: 33,693,976
+- Optimizer: Adam lr=1e-3
+- Epochs: 5 | Batch size: 512
+- Training time: ~199s/epoch
+- Val Accuracy: 90.78%
+- Macro F1: 0.85
+- Notes: Converting sparse to dense caused RAM crash. Fixed with SparseDataset.
+  Val accuracy plateaued after epoch 1 — overfitting observed.
+  Significant improvement over baseline (+2.08%)
+
+## Experiment 3: Improved MLP (Final Model)
+- Date: 21-03-2026
+- Model: 4-layer MLP from scratch (deeper + better regularization)
+- Features: HashingVectorizer bigrams, 2^16 features  
+- Parameters: 67,775,768
+- Optimizer: AdamW lr=2e-3, weight_decay=1e-4
+- Scheduler: CosineAnnealingLR T_max=8
+- Epochs: 8 | Batch size: 512
+- Training time: ~227s/epoch
+- Val Accuracy: 91.02%
+- Macro F1: 0.85
+- Notes: Consistent improvement across all 8 epochs. Still improving at epoch 8.
+  CosineAnnealingLR helped maintain stable training.
+  Best model saved at epoch 8.
+
+## Summary
+| Exp | Model | Accuracy | Macro F1 | Params |
+|-----|-------|----------|----------|--------|
+| 1 | SGD Baseline | 88.70% | 0.79 | N/A |
+| 2 | Custom MLP | 90.78% | 0.85 | 33.7M |
+| 3 | Improved MLP | 91.02% | 0.85 | 67.8M |
