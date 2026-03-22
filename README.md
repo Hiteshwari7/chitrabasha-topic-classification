@@ -87,3 +87,16 @@ Available topic labels:
 - Features: HashingVectorizer bigrams (2^16 features)
 - Hardware: Tesla T4 GPU
 - Training Time: ~227s per epoch x 8 epochs
+
+## Model Weights
+
+Due to GitHub's 100MB file size limit, model weights are hosted on Google Drive:
+
+| Model | Link | Size |
+|---|---|---|
+| Final Model (best_model.pt) | [Download](https://drive.google.com/file/d/1gptMK0exara7DjeUpKIVuIr2CQsqEi-T/view?usp=sharing) | 258 MB |
+
+To use the weights:
+1. Download `best_model.pt` from the link above
+2. Place it in `final_models/` directory
+3. Run inference as described above

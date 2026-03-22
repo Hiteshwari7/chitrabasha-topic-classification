@@ -61,3 +61,17 @@
 - Least multilingual class: home_and_hobbies (9.8%)
 - Key insight: multilingual content + low sample size = poor performance
 - HashingVectorizer handles unicode natively which helps multilingual classes
+
+## Experiment 4: FastText-style (Word + Character NGrams + Logistic Regression)
+- Date: 22-03-2026
+- Model: TF-IDF (word bigrams + char 3-5grams) + Logistic Regression
+- Word features: 50,000 | Char features: 50,000 | Combined: 100,000
+- Optimizer: saga, C=5.0, max_iter=500
+- Training time: 1649.7s (~27.5 mins)
+- Val Accuracy: 92.05%
+- Macro F1: 0.86
+- Notes: BEST performing model overall! Classical ML beat deep learning.
+  Character ngrams capture subword morphology — crucial for Hindi/multilingual content.
+  travel_and_tourism F1: 0.99 (95.6% multilingual — char ngrams helped!)
+  art_and_design still weakest (F1: 0.64) — low sample size issue persists.
+  Key insight: for multilingual text, character-level features are very powerful.
